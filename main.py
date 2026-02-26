@@ -1512,11 +1512,12 @@ async def make_lmarena_streaming_request_httpx(url: str, payload: dict, headers:
         request_obj = client.build_request(method, url, content=json.dumps(payload), headers=headers)
         response = await client.send(request_obj, stream=True)
         # We don't raise_for_status here so the upstream parser handles 429/401 properly.
-        # But if it's an error, we can yield the text immediately.
+        # But if it's an error, we MUST raise an HTTPException so the parent loop handles retries.
         if response.status_code >= 400:
             error_text = await response.aread()
-            yield error_text.decode('utf-8', errors='ignore')
-            return
+            error_str = error_text.decode('utf-8', errors='ignore')
+            debug_print(f"❌ HTTPX Stream Error {response.status_code}: {error_str}")
+            raise HTTPException(status_code=response.status_code, detail=f"HTTPX Stream Error: {error_str}")
             
         async for chunk in response.aiter_text():
             if chunk:
