@@ -517,10 +517,9 @@ async def refresh_recaptcha_token() -> Optional[str]:
     print("   PROBLEM: Cannot acquire new reCAPTCHA token.")
     print("")
     print("   SOLUTION:")
-    print("   1. Check the Chrome window - you may need to solve CAPTCHA again")
     print("   2. If Chrome is unresponsive, restart the server")
     
-    return None
+    return "disabled"
 
 # --- End New reCAPTCHA Functions ---
 
@@ -1131,7 +1130,9 @@ async def make_lmarena_request_browser(url: str, payload: dict, method: str = "P
         # Token may have expired while waiting in queue
         debug_print(f"🔄 Refreshing reCAPTCHA token after lock...")
         fresh_token = await refresh_recaptcha_token()
-        if fresh_token and 'recaptchaV3Token' in payload:
+        if fresh_token == "disabled":
+            debug_print("⚠️ reCAPTCHA fetching is disabled. Sending request without token.")
+        elif fresh_token and 'recaptchaV3Token' in payload:
             payload['recaptchaV3Token'] = fresh_token
             debug_print(f"✅ Fresh token applied ({len(fresh_token)} chars)")
     
@@ -1302,7 +1303,9 @@ async def make_lmarena_streaming_request_browser(url: str, payload: dict, method
     # Token may have expired while waiting in queue
     debug_print(f"🔄 [STREAM] Refreshing reCAPTCHA token after lock...")
     fresh_token = await refresh_recaptcha_token()
-    if fresh_token and 'recaptchaV3Token' in payload:
+    if fresh_token == "disabled":
+        debug_print("⚠️ [STREAM] reCAPTCHA fetching is disabled. Sending request without token.")
+    elif fresh_token and 'recaptchaV3Token' in payload:
         payload['recaptchaV3Token'] = fresh_token
         debug_print(f"✅ [STREAM] Fresh token applied ({len(fresh_token)} chars)")
     
@@ -2753,13 +2756,17 @@ async def api_chat_completions(request: Request, api_key: dict = Depends(rate_li
 
         # --- NEW: Get reCAPTCHA v3 Token for Payload ---
         recaptcha_token = await refresh_recaptcha_token()
-        if not recaptcha_token:
+        if recaptcha_token == "disabled":
+            debug_print("⚠️ reCAPTCHA fetching is disabled or failed. Proceeding without it (may fail if token is strictly required).")
+            recaptcha_token = "disabled"
+        elif not recaptcha_token:
             debug_print("❌ Cannot proceed, failed to get reCAPTCHA token.")
             raise HTTPException(
                 status_code=503,
                 detail="Service Unavailable: Failed to acquire reCAPTCHA token. The bridge server may be blocked."
             )
-        debug_print(f"🔑 Using reCAPTCHA v3 token: {recaptcha_token[:20]}...")
+        else:
+            debug_print(f"🔑 Using reCAPTCHA v3 token: {recaptcha_token[:20]}...")
         # -----------------------------------------------
         
         # Generate conversation ID from context (API key + model + first user message)
