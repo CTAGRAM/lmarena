@@ -1490,6 +1490,36 @@ async def make_lmarena_streaming_request_browser(url: str, payload: dict, method
             debug_print(f"🔓 [STREAM] Request lock released")
 
 
+async def make_lmarena_request_httpx(url: str, payload: dict, headers: dict, method: str = "POST") -> dict:
+    """Fallback method using standard HTTPX when browser is unavailable."""
+    debug_print(f"🌐 Making HTTPX request to: {url}")
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        request_obj = client.build_request(method, url, json=payload, headers=headers)
+        response = await client.send(request_obj)
+        return {
+            "status_code": response.status_code,
+            "text": response.text,
+            "ok": response.is_success
+        }
+
+async def make_lmarena_streaming_request_httpx(url: str, payload: dict, headers: dict, method: str = "POST"):
+    """Fallback streaming method using standard HTTPX when browser is unavailable."""
+    debug_print(f"🌐 Making HTTPX STREAMING request to: {url}")
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        request_obj = client.build_request(method, url, json=payload, headers=headers)
+        response = await client.send(request_obj, stream=True)
+        # We don't raise_for_status here so the upstream parser handles 429/401 properly.
+        # But if it's an error, we can yield the text immediately.
+        if response.status_code >= 400:
+            error_text = await response.aread()
+            yield error_text.decode('utf-8', errors='ignore')
+            return
+            
+        async for chunk in response.aiter_text():
+            if chunk:
+                yield chunk
+
+
 # --- Dashboard Authentication ---
 
 async def get_current_session(request: Request):
@@ -2895,21 +2925,25 @@ async def api_chat_completions(request: Request, api_key: dict = Depends(rate_li
             
             for attempt in range(max_retries):
                 try:
-                    # Use browser-based request (bypasses ALL bot detection)
-                    debug_print(f"🌐 Using REAL Chrome browser for API call (attempt {attempt + 1}/{max_retries})")
-                    browser_response = await make_lmarena_request_browser(url, payload, method=http_method)
+                    if BROWSER_READY and NODRIVER_TAB is not None:
+                        # Use browser-based request (bypasses ALL bot detection)
+                        debug_print(f"🌐 Using REAL Chrome browser for API call (attempt {attempt + 1}/{max_retries})")
+                        api_response = await make_lmarena_request_browser(url, payload, method=http_method)
+                    else:
+                        debug_print(f"🌐 Using HTTPX fallback for API call (attempt {attempt + 1}/{max_retries})")
+                        api_response = await make_lmarena_request_httpx(url, payload, headers, method=http_method)
                     
                     # Create a response-like object for compatibility
-                    class BrowserResponse:
+                    class CustomResponse:
                         def __init__(self, status_code, text):
                             self.status_code = status_code
                             self.text = text
-                            self.headers = {}  # Empty headers for browser requests
+                            self.headers = {}
                         def raise_for_status(self):
                             if self.status_code >= 400:
-                                raise HTTPException(status_code=self.status_code, detail=f"Browser request failed: {self.text[:200]}")
+                                raise HTTPException(status_code=self.status_code, detail=f"Request failed: {self.text[:200]}")
                     
-                    response = BrowserResponse(browser_response["status_code"], browser_response["text"])
+                    response = CustomResponse(api_response["status_code"], api_response["text"])
                     
                     # Log status with human-readable message
                     log_http_status(response.status_code, "LMArena API (via Browser)")
@@ -2958,14 +2992,19 @@ async def api_chat_completions(request: Request, api_key: dict = Depends(rate_li
                     reasoning_text = ""
                     citations = []
                     try:
-                        # Use browser-based streaming (bypasses reCAPTCHA!)
-                        debug_print(f"📡 Browser Streaming (attempt {attempt + 1}/{max_retries})")
-                        debug_print(f"🔐 Using REAL Chrome browser for streaming")
+                        if BROWSER_READY and NODRIVER_TAB is not None:
+                            # Use browser-based streaming (bypasses reCAPTCHA!)
+                            debug_print(f"📡 Browser Streaming (attempt {attempt + 1}/{max_retries})")
+                            debug_print(f"🔐 Using REAL Chrome browser for streaming")
+                            stream_gen = make_lmarena_streaming_request_browser(url, payload, method=http_method)
+                        else:
+                            debug_print(f"📡 HTTPX Streaming fallback (attempt {attempt + 1}/{max_retries})")
+                            stream_gen = make_lmarena_streaming_request_httpx(url, payload, headers, method=http_method)
                         
                         # Buffer for accumulating partial lines across chunks
                         line_buffer = ""
                         
-                        async for raw_chunk in make_lmarena_streaming_request_browser(url, payload, method=http_method):
+                        async for raw_chunk in stream_gen:
                             # Combine buffer with new chunk and split into lines
                             combined = line_buffer + raw_chunk
                             chunk_lines = combined.split('\n')
