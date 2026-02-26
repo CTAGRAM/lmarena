@@ -1022,17 +1022,18 @@ def get_request_headers_with_token(token: str):
     config = get_config()
     cf_clearance = config.get("cf_clearance", "").strip()
     
-    # Check if the token is a full cookie    # Support raw tokens, tokens prefixed with cookie names, and base64 prefixed tokens
-    if "arena-auth-prod-v1" in token and "=" in token:
-        # User pasted the whole cookie string, let's extract just the token part
-        # Handle both v1, v1.0, and v1.1 formats
-        if "arena-auth-prod-v1.0=" in token:
-            token = token.split("arena-auth-prod-v1.0=")[-1].split(";")[0].strip()
-        elif "arena-auth-prod-v1=" in token:
-            token = token.split("arena-auth-prod-v1=")[-1].split(";")[0].strip()
-            
-    # Always use the current v1.0 key for the final payload to LMArena
-    cookie_header = f"cf_clearance={cf_clearance}; arena-auth-prod-v1.0={token}"
+    # Check if the token is a full cookie string
+    if "=" in token:
+        # The user pasted raw cookie data (e.g. from document.cookie)
+        # This is CRITICAL because LMArena now splits large tokens into v1.0 and v1.1
+        cookie_header = token
+        
+        # Inject cf_clearance if we have it and it's missing from the raw string
+        if cf_clearance and "cf_clearance=" not in cookie_header:
+            cookie_header = f"cf_clearance={cf_clearance}; {cookie_header}"
+    else:
+        # Fallback for simple raw token values
+        cookie_header = f"cf_clearance={cf_clearance}; arena-auth-prod-v1.0={token}"
 
     return {
         "Content-Type": "text/plain;charset=UTF-8",
