@@ -1024,15 +1024,15 @@ def get_request_headers_with_token(token: str):
     
     # Check if the token is a full cookie    # Support raw tokens, tokens prefixed with cookie names, and base64 prefixed tokens
     if "arena-auth-prod-v1" in token and "=" in token:
-        # User pasted the whole cookie string
-        token = token.split("arena-auth-prod-v1")[-1].split("=", 1)[-1].strip()
-        # Ensure cf_clearance is updated if present in the string? 
-        # Actually, best to just use what user gave, but we might want to ensure cf_clearance is there.
-        # If user gave full string, it likely has everything.
-        cookie_header = token
-    else:
-        # Standard behavior: wrap the value
-        cookie_header = f"cf_clearance={cf_clearance}; arena-auth-prod-v1={token}"
+        # User pasted the whole cookie string, let's extract just the token part
+        # Handle both v1, v1.0, and v1.1 formats
+        if "arena-auth-prod-v1.0=" in token:
+            token = token.split("arena-auth-prod-v1.0=")[-1].split(";")[0].strip()
+        elif "arena-auth-prod-v1=" in token:
+            token = token.split("arena-auth-prod-v1=")[-1].split(";")[0].strip()
+            
+    # Always use the current v1.0 key for the final payload to LMArena
+    cookie_header = f"cf_clearance={cf_clearance}; arena-auth-prod-v1.0={token}"
 
     return {
         "Content-Type": "text/plain;charset=UTF-8",
