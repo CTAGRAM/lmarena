@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+httpx
+nodriver
+curl_cffi
+python-multipart

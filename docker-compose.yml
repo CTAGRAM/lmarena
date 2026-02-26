@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  lmarenabridge:
+    build: .
+    container_name: lmarenabridge
+    restart: unless-stopped
+    ports:
+      - "7860:7860"
+    volumes:
+      - ./config.json:/app/config.json
+      - ./models.json:/app/models.json
+      # Optional: persist Chrome profile
+      - ./chrome_profile:/app/chrome_profile
+    environment:
+      - TZ=UTC

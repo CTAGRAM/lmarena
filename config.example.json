@@ -1,0 +1,14 @@
+{
+    "password": "admin",
+    "auth_tokens": [],
+    "cf_clearance": "",
+    "api_keys": [
+        {
+            "name": "default",
+            "key": "sk-lmab-your-api-key-here",
+            "rpm": 60,
+            "created": 1772043549
+        }
+    ],
+    "usage_stats": {}
+}
