@@ -1038,6 +1038,9 @@ def get_request_headers_with_token(token: str):
         "Content-Type": "text/plain;charset=UTF-8",
         "Cookie": cookie_header,
         "User-Agent": USER_AGENT,
+        "Origin": "https://arena.ai",
+        "Referer": "https://arena.ai/",
+        "Accept": "*/*",
     }
 
 def get_next_auth_token(exclude_tokens: set = None):
@@ -1494,7 +1497,7 @@ async def make_lmarena_request_httpx(url: str, payload: dict, headers: dict, met
     """Fallback method using standard HTTPX when browser is unavailable."""
     debug_print(f"🌐 Making HTTPX request to: {url}")
     async with httpx.AsyncClient(timeout=120.0) as client:
-        request_obj = client.build_request(method, url, json=payload, headers=headers)
+        request_obj = client.build_request(method, url, content=json.dumps(payload), headers=headers)
         response = await client.send(request_obj)
         return {
             "status_code": response.status_code,
@@ -1506,7 +1509,7 @@ async def make_lmarena_streaming_request_httpx(url: str, payload: dict, headers:
     """Fallback streaming method using standard HTTPX when browser is unavailable."""
     debug_print(f"🌐 Making HTTPX STREAMING request to: {url}")
     async with httpx.AsyncClient(timeout=120.0) as client:
-        request_obj = client.build_request(method, url, json=payload, headers=headers)
+        request_obj = client.build_request(method, url, content=json.dumps(payload), headers=headers)
         response = await client.send(request_obj, stream=True)
         # We don't raise_for_status here so the upstream parser handles 429/401 properly.
         # But if it's an error, we can yield the text immediately.
