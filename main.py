@@ -28,11 +28,15 @@ except ImportError:
     print("   2. Restart LMArenaBridge")
     print("=" * 60)
 
-from fastapi import FastAPI, HTTPException, Depends, status, Form, Request, Response, Header
+from fastapi import FastAPI, HTTPException, Depends, status, Form, Request, Response, Header, BackgroundTasks
 from starlette.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.security import APIKeyHeader
 
 import httpx
+
+# In-memory storage for async media generation jobs
+media_jobs = {}
+
 
 # curl_cffi for TLS fingerprint mimicking (bypasses Cloudflare JA3 detection)
 try:
@@ -3741,6 +3745,115 @@ async def api_images_generations(request: Request, api_key: dict = Depends(rate_
         if isinstance(e, HTTPException):
             raise
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/v1/jobs/media")
+@app.post("/api/v1/jobs/media")
+async def api_media_job_create(request: Request, background_tasks: BackgroundTasks, api_key: dict = Depends(rate_limit_api_key)):
+    """
+    Creates an async media generation job (Image or Video) and returns a job_id for polling.
+    Useful for heavy models or platforms that timeout on synchronous requests.
+    """
+    debug_print("\n" + "="*80)
+    debug_print("🎥 NEW ASYNC MEDIA GENERATION JOB RECEIVED")
+    debug_print("="*80)
+    
+    try:
+        body = await request.json()
+        prompt = body.get("prompt", "")
+        model = body.get("model", "dall-e-3")
+        
+        if not prompt:
+            raise HTTPException(status_code=400, detail="Missing 'prompt' in request body.")
+            
+        job_id = f"job-{uuid.uuid4().hex}"
+        media_jobs[job_id] = {
+            "id": job_id,
+            "status": "pending",
+            "url": None,
+            "error": None,
+            "created_at": time.time(),
+            "model": model
+        }
+        
+        # Build headers for background task
+        auth_header = request.headers.get("Authorization", "")
+        
+        debug_print(f"✅ Job {job_id} created for {model}. Starting background generation...")
+        background_tasks.add_task(process_media_job, job_id, model, prompt, auth_header)
+        
+        return {"id": job_id, "status": "pending"}
+    except Exception as e:
+        debug_print(f"❌ Error creating media job: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def process_media_job(job_id: str, model: str, prompt: str, auth_header: str):
+    """Background task to execute media generation and process the URL result."""
+    try:
+        chat_body = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False
+        }
+        internal_headers = {"Content-Type": "application/json"}
+        if auth_header:
+            internal_headers["Authorization"] = auth_header
+            
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            response = await client.post(
+                f"http://localhost:{PORT}/api/v1/chat/completions",
+                headers=internal_headers,
+                json=chat_body
+            )
+            
+            if response.status_code != 200:
+                media_jobs[job_id]["status"] = "failed"
+                media_jobs[job_id]["error"] = response.text[:200]
+                debug_print(f"❌ Background job {job_id} failed: {response.text[:100]}")
+                return
+                
+            openai_response = response.json()
+            content = openai_response.get("choices", [{}])[0].get("message", {}).get("content", "")
+            
+            import re
+            
+            # Extract markdown wrapped URLs (either image ![alt](url) or generic link [alt](url))
+            media_url = None
+            url_match = re.search(r'!\[.*?\]\((.*?)\)', content)
+            if not url_match:
+                url_match = re.search(r'\[.*?\]\((.*?)\)', content)
+                
+            if url_match:
+                media_url = url_match.group(1)
+            else:
+                # Fallback to finding raw link in text
+                urls = re.findall(r'(https?://[^\s]+)', content)
+                if urls:
+                    media_url = urls[0]
+                else:
+                    media_url = content
+            
+            media_jobs[job_id]["status"] = "completed"
+            media_jobs[job_id]["url"] = media_url
+            debug_print(f"✅ Background job {job_id} completed successfully!")
+            
+    except Exception as e:
+        media_jobs[job_id]["status"] = "failed"
+        media_jobs[job_id]["error"] = str(e)
+        debug_print(f"❌ Background job {job_id} encountered exception: {e}")
+
+@app.get("/v1/jobs/media/{job_id}")
+@app.get("/api/v1/jobs/media/{job_id}")
+async def api_media_job_status(job_id: str, api_key: dict = Depends(rate_limit_api_key)):
+    """
+    Polls the status of an async media generation job by ID.
+    Returns JSON containing the status ('pending', 'completed', 'failed') and 'url' if completed.
+    Storage is 100% in-memory and holds only URLs - requires zero disk space.
+    """
+    job = media_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+        
+    return job
 
 @app.post("/v1/messages")
 @app.post("/api/v1/messages")
