@@ -312,7 +312,7 @@ async def initialize_nodriver_browser():
                         if "=" in part:
                             cookie_name = part.split("=")[0].strip()
                             cookie_value = part.split("=", 1)[1].strip()
-                            await NODRIVER_TAB.evaluate(f"document.cookie = '{cookie_name}={cookie_value}; path=/; domain=.arena.ai; secure; max-age=86400'")
+                            await NODRIVER_TAB.evaluate(f"document.cookie = '{cookie_name}={cookie_value}; path=/; max-age=86400'")
                             cookies_injected += 1
                             debug_print(f"   ├── 🍪 Injected {cookie_name} ({len(cookie_value)} chars)")
                 else:
@@ -327,12 +327,12 @@ async def initialize_nodriver_browser():
                         part0 = clean_token[:half]
                         part1 = clean_token[half:]
                         
-                        await NODRIVER_TAB.evaluate(f"document.cookie = 'arena-auth-prod-v1.0={part0}; path=/; domain=.arena.ai; secure; max-age=86400'")
-                        await NODRIVER_TAB.evaluate(f"document.cookie = 'arena-auth-prod-v1.1={part1}; path=/; domain=.arena.ai; secure; max-age=86400'")
+                        await NODRIVER_TAB.evaluate(f"document.cookie = 'arena-auth-prod-v1.0={part0}; path=/; max-age=86400'")
+                        await NODRIVER_TAB.evaluate(f"document.cookie = 'arena-auth-prod-v1.1={part1}; path=/; max-age=86400'")
                         cookies_injected += 2
                         debug_print(f"   ├── 🍪 Injected split auth cookie (v1.0: {len(part0)} + v1.1: {len(part1)} chars)")
                     else:
-                        await NODRIVER_TAB.evaluate(f"document.cookie = 'arena-auth-prod-v1.0={clean_token}; path=/; domain=.arena.ai; secure; max-age=86400'")
+                        await NODRIVER_TAB.evaluate(f"document.cookie = 'arena-auth-prod-v1.0={clean_token}; path=/; max-age=86400'")
                         cookies_injected += 1
                         debug_print(f"   ├── 🍪 Injected auth cookie v1.0 ({len(clean_token)} chars)")
                 
@@ -341,9 +341,19 @@ async def initialize_nodriver_browser():
             # Inject cf_clearance if available
             cf_clearance = config.get("cf_clearance", "").strip()
             if cf_clearance:
-                await NODRIVER_TAB.evaluate(f"document.cookie = 'cf_clearance={cf_clearance}; path=/; domain=.arena.ai; secure; max-age=86400'")
+                await NODRIVER_TAB.evaluate(f"document.cookie = 'cf_clearance={cf_clearance}; path=/; max-age=86400'")
                 cookies_injected += 1
                 debug_print(f"   ├── 🍪 Injected cf_clearance cookie")
+            
+            # Verify cookies were actually set by reading them back
+            if cookies_injected > 0:
+                try:
+                    browser_cookies = await NODRIVER_TAB.evaluate("document.cookie")
+                    has_v10 = "arena-auth-prod-v1.0" in browser_cookies
+                    has_v11 = "arena-auth-prod-v1.1" in browser_cookies
+                    debug_print(f"   ├── 🔍 Cookie verification: v1.0={'✅' if has_v10 else '❌'} v1.1={'✅' if has_v11 else '❌'} (browser has {len(browser_cookies)} chars)")
+                except Exception as ve:
+                    debug_print(f"   ├── ⚠️ Cookie verification failed: {ve}")
             
             if cookies_injected > 0:
                 print(f"   ├── 🍪 Injected {cookies_injected} auth cookies into browser session")
