@@ -304,24 +304,37 @@ async def initialize_nodriver_browser():
             # Inject auth tokens as browser cookies
             auth_tokens = config.get("auth_tokens", [])
             for i, token in enumerate(auth_tokens):
-                clean_token = token
-                if clean_token.startswith("base64-"):
-                    clean_token = clean_token[7:]
-                
-                # Split large tokens across v1.0 and v1.1 (4000 byte cookie limit)
-                if len(clean_token) > 3900:
-                    half = len(clean_token) // 2
-                    part0 = clean_token[:half]
-                    part1 = clean_token[half:]
-                    
-                    await NODRIVER_TAB.evaluate(f"document.cookie = 'arena-auth-prod-v1.0={part0}; path=/; domain=.arena.ai; secure; max-age=86400'")
-                    await NODRIVER_TAB.evaluate(f"document.cookie = 'arena-auth-prod-v1.1={part1}; path=/; domain=.arena.ai; secure; max-age=86400'")
-                    cookies_injected += 2
-                    debug_print(f"   ├── 🍪 Injected split auth cookie (v1.0: {len(part0)} + v1.1: {len(part1)} chars)")
+                # Case 1: Raw cookie string (e.g. "arena-auth-prod-v1.0=xxx; arena-auth-prod-v1.1=yyy")
+                if "arena-auth-prod" in token and "=" in token:
+                    # Parse individual cookies and inject each one
+                    cookie_parts = [c.strip() for c in token.split(";") if c.strip()]
+                    for part in cookie_parts:
+                        if "=" in part:
+                            cookie_name = part.split("=")[0].strip()
+                            cookie_value = part.split("=", 1)[1].strip()
+                            await NODRIVER_TAB.evaluate(f"document.cookie = '{cookie_name}={cookie_value}; path=/; domain=.arena.ai; secure; max-age=86400'")
+                            cookies_injected += 1
+                            debug_print(f"   ├── 🍪 Injected {cookie_name} ({len(cookie_value)} chars)")
                 else:
-                    await NODRIVER_TAB.evaluate(f"document.cookie = 'arena-auth-prod-v1.0={clean_token}; path=/; domain=.arena.ai; secure; max-age=86400'")
-                    cookies_injected += 1
-                    debug_print(f"   ├── 🍪 Injected auth cookie v1.0 ({len(clean_token)} chars)")
+                    # Case 2: Single token value (base64- prefixed or plain)
+                    clean_token = token
+                    if clean_token.startswith("base64-"):
+                        clean_token = clean_token[7:]
+                    
+                    # Split large tokens across v1.0 and v1.1 (4000 byte cookie limit)
+                    if len(clean_token) > 3900:
+                        half = len(clean_token) // 2
+                        part0 = clean_token[:half]
+                        part1 = clean_token[half:]
+                        
+                        await NODRIVER_TAB.evaluate(f"document.cookie = 'arena-auth-prod-v1.0={part0}; path=/; domain=.arena.ai; secure; max-age=86400'")
+                        await NODRIVER_TAB.evaluate(f"document.cookie = 'arena-auth-prod-v1.1={part1}; path=/; domain=.arena.ai; secure; max-age=86400'")
+                        cookies_injected += 2
+                        debug_print(f"   ├── 🍪 Injected split auth cookie (v1.0: {len(part0)} + v1.1: {len(part1)} chars)")
+                    else:
+                        await NODRIVER_TAB.evaluate(f"document.cookie = 'arena-auth-prod-v1.0={clean_token}; path=/; domain=.arena.ai; secure; max-age=86400'")
+                        cookies_injected += 1
+                        debug_print(f"   ├── 🍪 Injected auth cookie v1.0 ({len(clean_token)} chars)")
                 
                 break  # Only inject the first token
             
