@@ -1229,7 +1229,7 @@ async def make_lmarena_request_browser(url: str, payload: dict, method: str = "P
             fetch('{url}', {{
                 method: '{method}',
                 headers: {{
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'text/plain;charset=UTF-8'
                 }},
                 body: '{payload_json}',
                 credentials: 'include'
@@ -1740,16 +1740,49 @@ async def get_initial_data():
         print(f"   └── ❌ Error during data extraction: {e}")
 
 async def periodic_refresh_task():
-    """Background task to refresh cf_clearance and models every 30 minutes"""
+    """Background task to refresh auth tokens, cf_clearance, and models every 45 minutes.
+    
+    LMArena uses Supabase auth tokens that expire every ~60 minutes.
+    By reloading the page, the Supabase client automatically refreshes the session
+    using the stored refresh_token, which generates fresh auth cookies.
+    """
+    global NODRIVER_TAB, BROWSER_READY
     while True:
         try:
-            # Wait 30 minutes (1800 seconds)
-            await asyncio.sleep(1800)
+            # Wait 45 minutes (2700 seconds) — tokens expire in 60 min, so refresh at 45
+            await asyncio.sleep(2700)
             debug_print("\n" + "="*60)
-            debug_print("🔄 Starting scheduled 30-minute refresh...")
+            debug_print("🔄 Starting scheduled 45-minute auth refresh...")
             debug_print("="*60)
+            
+            if BROWSER_READY and NODRIVER_TAB is not None:
+                try:
+                    # Step 1: Reload the page to trigger Supabase's auto-refresh
+                    debug_print("🔄 Reloading arena.ai to refresh Supabase session...")
+                    await NODRIVER_TAB.evaluate("location.reload()")
+                    await asyncio.sleep(5)  # Wait for page to reload and session to refresh
+                    
+                    # Step 2: Re-inject cookies from config (in case page reload cleared them)
+                    config = get_config()
+                    auth_tokens = config.get("auth_tokens", [])
+                    if auth_tokens:
+                        token = auth_tokens[0]
+                        if "arena-auth-prod" in token and "=" in token:
+                            cookie_parts = [c.strip() for c in token.split(";") if c.strip()]
+                            for part in cookie_parts:
+                                if "=" in part:
+                                    cookie_name = part.split("=")[0].strip()
+                                    cookie_value = part.split("=", 1)[1].strip()
+                                    await NODRIVER_TAB.evaluate(f"document.cookie = '{cookie_name}={cookie_value}; path=/; max-age=86400'")
+                        debug_print("🍪 Re-injected auth cookies after page reload")
+                    
+                    debug_print("✅ Page reloaded, session refreshed")
+                except Exception as e:
+                    debug_print(f"⚠️ Page reload failed: {e}")
+            
+            # Step 3: Extract fresh cookies from browser
             await get_initial_data()
-            debug_print("✅ Scheduled refresh completed")
+            debug_print("✅ Scheduled auth refresh completed")
             debug_print("="*60 + "\n")
         except Exception as e:
             debug_print(f"❌ Error in periodic refresh task: {e}")
