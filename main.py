@@ -1247,7 +1247,7 @@ async def make_lmarena_request_browser(url: str, payload: dict, method: str = "P
             fetch('{url}', {{
                 method: '{method}',
                 headers: {{
-                    'Content-Type': 'text/plain;charset=UTF-8'
+                    'Content-Type': 'application/json'
                 }},
                 body: '{payload_json}',
                 credentials: 'include'
