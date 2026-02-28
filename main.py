@@ -3057,7 +3057,10 @@ async def api_chat_completions(request: Request, api_key: dict = Depends(rate_li
                     if BROWSER_READY and NODRIVER_TAB is not None:
                         # Use browser-based request (bypasses ALL bot detection)
                         debug_print(f"🌐 Using REAL Chrome browser for API call (attempt {attempt + 1}/{max_retries})")
-                        api_response = await make_lmarena_request_browser(url, payload, method=http_method)
+                        # Strip reCAPTCHA token for browser requests - cookies handle auth
+                        # Datacenter IPs always fail reCAPTCHA v3 scoring
+                        browser_payload = {k: v for k, v in payload.items() if k != 'recaptchaV3Token'}
+                        api_response = await make_lmarena_request_browser(url, browser_payload, method=http_method)
                     else:
                         debug_print(f"🌐 Using HTTPX fallback for API call (attempt {attempt + 1}/{max_retries})")
                         api_response = await make_lmarena_request_httpx(url, payload, headers, method=http_method)
