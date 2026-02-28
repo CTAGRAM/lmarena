@@ -302,57 +302,53 @@ async def initialize_nodriver_browser():
             config = get_config()
             cookies_injected = 0
             
-            # Inject auth tokens as browser cookies via CDP
-            auth_tokens = config.get("auth_tokens", [])
-            for i, token in enumerate(auth_tokens):
-                # Case 1: Raw cookie string (e.g. "arena-auth-prod-v1.0=xxx; arena-auth-prod-v1.1=yyy")
-                if "arena-auth-prod" in token and "=" in token:
-                    cookie_parts = [c.strip() for c in token.split(";") if c.strip()]
-                    for part in cookie_parts:
-                        if "=" in part:
-                            cookie_name = part.split("=")[0].strip()
-                            cookie_value = part.split("=", 1)[1].strip()
-                            # Use CDP Network.setCookie for HttpOnly support
-                            await NODRIVER_TAB.send(nodriver.cdp.network.set_cookie(
-                                name=cookie_name,
-                                value=cookie_value,
-                                domain=".arena.ai",
-                                path="/",
-                                secure=True,
-                                http_only=True,
-                            ))
-                            cookies_injected += 1
-                            debug_print(f"   ├── 🍪 Injected {cookie_name} via CDP ({len(cookie_value)} chars)")
-                else:
-                    # Case 2: Single token value (base64- prefixed or plain)
+            # Priority 1: Use dedicated v1.0/v1.1 fields (most reliable, no parsing needed)
+            v10 = config.get("auth_tokens_v10", "").strip()
+            v11 = config.get("auth_tokens_v11", "").strip()
+            
+            if v10:
+                await NODRIVER_TAB.send(nodriver.cdp.network.set_cookie(
+                    name="arena-auth-prod-v1.0", value=v10,
+                    domain=".arena.ai", path="/", secure=True, http_only=True,
+                ))
+                cookies_injected += 1
+                debug_print(f"   ├── 🍪 Injected arena-auth-prod-v1.0 via CDP ({len(v10)} chars)")
+            
+            if v11:
+                await NODRIVER_TAB.send(nodriver.cdp.network.set_cookie(
+                    name="arena-auth-prod-v1.1", value=v11,
+                    domain=".arena.ai", path="/", secure=True, http_only=True,
+                ))
+                cookies_injected += 1
+                debug_print(f"   ├── 🍪 Injected arena-auth-prod-v1.1 via CDP ({len(v11)} chars)")
+            
+            # Priority 2: Fall back to auth_tokens array if no dedicated fields
+            if cookies_injected == 0:
+                auth_tokens = config.get("auth_tokens", [])
+                for token in auth_tokens:
                     clean_token = token
                     if clean_token.startswith("base64-"):
                         clean_token = clean_token[7:]
                     
                     if len(clean_token) > 3900:
                         half = len(clean_token) // 2
-                        part0 = clean_token[:half]
-                        part1 = clean_token[half:]
-                        
                         await NODRIVER_TAB.send(nodriver.cdp.network.set_cookie(
-                            name="arena-auth-prod-v1.0", value=part0,
+                            name="arena-auth-prod-v1.0", value=clean_token[:half],
                             domain=".arena.ai", path="/", secure=True, http_only=True,
                         ))
                         await NODRIVER_TAB.send(nodriver.cdp.network.set_cookie(
-                            name="arena-auth-prod-v1.1", value=part1,
+                            name="arena-auth-prod-v1.1", value=clean_token[half:],
                             domain=".arena.ai", path="/", secure=True, http_only=True,
                         ))
                         cookies_injected += 2
-                        debug_print(f"   ├── 🍪 Injected split auth cookie via CDP (v1.0: {len(part0)} + v1.1: {len(part1)} chars)")
                     else:
                         await NODRIVER_TAB.send(nodriver.cdp.network.set_cookie(
                             name="arena-auth-prod-v1.0", value=clean_token,
                             domain=".arena.ai", path="/", secure=True, http_only=True,
                         ))
                         cookies_injected += 1
-                        debug_print(f"   ├── 🍪 Injected auth cookie v1.0 via CDP ({len(clean_token)} chars)")
-                
-                break  # Only inject the first token
+                    debug_print(f"   ├── 🍪 Injected auth token via CDP (fallback)")
+                    break
             
             # Inject cf_clearance if available
             cf_clearance = config.get("cf_clearance", "").strip()
