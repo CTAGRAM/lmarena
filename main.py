@@ -1022,8 +1022,10 @@ def get_request_headers_with_token(token: str):
     config = get_config()
     cf_clearance = config.get("cf_clearance", "").strip()
     
-    # Check if the token is a full cookie string
-    if "=" in token:
+    # Check if the token is a full raw cookie string (from document.cookie)
+    # IMPORTANT: Only detect as raw cookie if it contains an actual cookie key name
+    # Don't match on just "=" because base64 tokens naturally contain "=" padding
+    if "arena-auth-prod" in token and "=" in token:
         # The user pasted raw cookie data (e.g. from document.cookie)
         # This is CRITICAL because LMArena now splits large tokens into v1.0 and v1.1
         cookie_header = token
@@ -1032,8 +1034,12 @@ def get_request_headers_with_token(token: str):
         if cf_clearance and "cf_clearance=" not in cookie_header:
             cookie_header = f"cf_clearance={cf_clearance}; {cookie_header}"
     else:
-        # Fallback for simple raw token values
-        cookie_header = f"cf_clearance={cf_clearance}; arena-auth-prod-v1.0={token}"
+        # Standard behavior: wrap the raw token value with the cookie key
+        # Strip "base64-" prefix if present (it's just a marker, not part of the token)
+        clean_token = token
+        if clean_token.startswith("base64-"):
+            clean_token = clean_token[7:]  # Remove "base64-" prefix
+        cookie_header = f"cf_clearance={cf_clearance}; arena-auth-prod-v1.0={clean_token}"
 
     return {
         "Content-Type": "text/plain;charset=UTF-8",
