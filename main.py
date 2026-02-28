@@ -294,6 +294,50 @@ async def initialize_nodriver_browser():
                 debug_print(f"🕵️  Captured User-Agent: {USER_AGENT[:50]}...")
         except Exception as e:
             debug_print(f"⚠️  Failed to captures User-Agent: {e}")
+        
+        # CRITICAL: Inject auth cookies from config.json into the browser session
+        # This enables headless servers (where user can't manually log in) to work
+        try:
+            config = get_config()
+            cookies_injected = 0
+            
+            # Inject auth tokens as browser cookies
+            auth_tokens = config.get("auth_tokens", [])
+            for i, token in enumerate(auth_tokens):
+                clean_token = token
+                if clean_token.startswith("base64-"):
+                    clean_token = clean_token[7:]
+                
+                # Split large tokens across v1.0 and v1.1 (4000 byte cookie limit)
+                if len(clean_token) > 3900:
+                    half = len(clean_token) // 2
+                    part0 = clean_token[:half]
+                    part1 = clean_token[half:]
+                    
+                    await NODRIVER_TAB.evaluate(f"document.cookie = 'arena-auth-prod-v1.0={part0}; path=/; domain=.arena.ai; secure; max-age=86400'")
+                    await NODRIVER_TAB.evaluate(f"document.cookie = 'arena-auth-prod-v1.1={part1}; path=/; domain=.arena.ai; secure; max-age=86400'")
+                    cookies_injected += 2
+                    debug_print(f"   ├── 🍪 Injected split auth cookie (v1.0: {len(part0)} + v1.1: {len(part1)} chars)")
+                else:
+                    await NODRIVER_TAB.evaluate(f"document.cookie = 'arena-auth-prod-v1.0={clean_token}; path=/; domain=.arena.ai; secure; max-age=86400'")
+                    cookies_injected += 1
+                    debug_print(f"   ├── 🍪 Injected auth cookie v1.0 ({len(clean_token)} chars)")
+                
+                break  # Only inject the first token
+            
+            # Inject cf_clearance if available
+            cf_clearance = config.get("cf_clearance", "").strip()
+            if cf_clearance:
+                await NODRIVER_TAB.evaluate(f"document.cookie = 'cf_clearance={cf_clearance}; path=/; domain=.arena.ai; secure; max-age=86400'")
+                cookies_injected += 1
+                debug_print(f"   ├── 🍪 Injected cf_clearance cookie")
+            
+            if cookies_injected > 0:
+                print(f"   ├── 🍪 Injected {cookies_injected} auth cookies into browser session")
+            else:
+                print(f"   ├── ⚠️ No auth cookies to inject (add tokens via dashboard)")
+        except Exception as e:
+            debug_print(f"   ├── ⚠️ Cookie injection failed: {e}")
             
         # Wait for page to settle
         await asyncio.sleep(3)
